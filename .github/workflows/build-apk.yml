@@ -24,16 +24,13 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install dependencies
         run: npm ci
 
-      - name: Generate Native Android Project
-        run: npx expo prebuild --platform android --clean
+      - name: Generate Native Android
+        run: npx expo prebuild --platform android
 
-      - name: Build Android APK
+      - name: Build APK with Gradle
         run: |
           cd android
           chmod +x gradlew
