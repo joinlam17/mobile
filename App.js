@@ -1,33 +1,33 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Switch, Alert, NativeModules } from 'react-native';
+import { StyleSheet, Text, View, TextInput, TouchableOpacity, ScrollView, Switch } from 'react-native';
 import * as Location from 'expo-location';
 import * as SQLite from 'expo-sqlite';
 import axios from 'axios';
+
+// 鎖入 DeepSeek API Key 鎖匙
+const DEEPSEEK_API_KEY = 'Sk-560d90c0c5054500be5d21ade4d3af2d';
 
 // 初始化 SQLite 本地記憶大腦
 const db = SQLite.openDatabaseSync('brain_memory.db');
 
 export default function App() {
-  // --- 系統狀態與切換開關 ---
   const [messages, setMessages] = useState([
-    { id: 1, sender: 'ai', text: '😈 終極大腦已啟動！支援 GPS、記憶庫與 DeepSeek 視覺。不開工時隨便傾計，開工時我幫你𥄫實畫面！' }
+    { id: 1, sender: 'ai', text: '😈 DeepSeek API 鎖匙已成功解鎖！地址算盤、先搶先得與 SQLite 記憶庫全面升級。' }
   ]);
   const [inputText, setInputText] = useState('');
   const [locationText, setLocationText] = useState('定位中...');
   
   // 核心功能開關
-  const [isFloatingMode, setIsFloatingMode] = useState(false); // 浮遊視窗模式 (HUD)
-  const [isAutoRefresh, setIsAutoRefresh] = useState(false);   // 自動下拉刷新 (代替影片中的人手狂刷)
-  const [isAutoClick, setIsAutoClick] = useState(false);       // 自動點擊 (防風控擬真手勢)
+  const [isFloatingMode, setIsFloatingMode] = useState(false);
+  const [isAutoRefresh, setIsAutoRefresh] = useState(false);   
+  const [isAutoClick, setIsAutoClick] = useState(false);       
+  const [rejectLongDistance, setRejectLongDistance] = useState(true);
 
-  // --- 1. 啟動初始化 (GPS 與 資料庫) ---
   useEffect(() => {
-    // 建立記憶資料表
     db.execSync(`
       CREATE TABLE IF NOT EXISTS Experience (id INTEGER PRIMARY KEY AUTOINCREMENT, rule TEXT, date TEXT);
     `);
 
-    // 獲取 GPS 實時定位
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
@@ -35,82 +35,81 @@ export default function App() {
         return;
       }
       let location = await Location.getCurrentPositionAsync({});
-      // 假設將經緯度轉換為地區，這裡簡單顯示
       setLocationText(`Lat:${location.coords.latitude.toFixed(2)} Lon:${location.coords.longitude.toFixed(2)}`);
     })();
   }, []);
 
-  // --- 2. 狀態同步：發送指令給底層 Kotlin 無障礙服務 ---
-  useEffect(() => {
-    // 這裡的概念是透過 React Native Bridge 通知底層 Android 啟動反偵測點擊/滑動
-    // NativeModules.AccessibilityController.updateConfig(isAutoRefresh, isAutoClick);
-    console.log(`[系統底層同步] 自動刷新: ${isAutoRefresh}, 自動點擊: ${isAutoClick}`);
-  }, [isAutoRefresh, isAutoClick]);
-
-  // --- 3. 聊天與 DeepSeek API (多模態大腦) ---
   const handleSend = async () => {
     if (!inputText.trim()) return;
     const userMsg = { id: Date.now(), sender: 'user', text: inputText };
     setMessages((prev) => [...prev, userMsg]);
     setInputText('');
 
-    // 觸發 DeepSeek API (包含 GPS 與 歷史記憶上下文)
     try {
-      // 讀取最新 3 條記憶
       const memory = db.getAllSync('SELECT * FROM Experience ORDER BY id DESC LIMIT 3');
       const memoryContext = memory.map(m => m.rule).join('; ');
 
       const response = await axios.post('https://api.deepseek.com/chat/completions', {
-        model: 'deepseek-chat', // 若需看圖可切換為支援 vision 的模型
+        model: 'deepseek-chat',
         messages: [
           { 
             role: 'system', 
-            content: `你是極客外賣助手。當前 GPS：${locationText}。
-            你的記憶體包含：${memoryContext}。
-            如果用戶提供截圖，請識別黃色按鈕（如"搶柯打", "收到", "接2張訂單"）。用簡短廣東話或二次元語氣回覆。` 
+            content: `你是極客外賣搶單大腦。當前位置：${locationText}。
+            記憶庫：${memoryContext}。
+            
+            【搶單過濾鐵律】：
+            1. 認准黃色按鈕文字：['搶柯打', '收到', '接2張訂單', '先搶先得']。
+            2. 地址與金額算盤：
+               - 識別畫面中的『取餐地址』與『送達地址』。
+               - 如果送達地址為遠區/跨區/上山（如薄扶林、山頂、長途），且金額 < $50，輸出 [IGNORE] 拒絕！
+               - 如果距離近、單價符合標準，或包含『先搶先得』，立即觸發點擊！` 
           },
           { role: 'user', content: inputText }
         ]
       }, {
-        headers: { 'Authorization': 'Bearer YOUR_DEEPSEEK_API_KEY' }
+        headers: { 
+          'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
       });
 
       const aiReply = response.data.choices[0].message.content;
       setMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'ai', text: aiReply }]);
       
-      // AI 自主學習：如果對話中包含新規則，自動寫入 SQLite
-      if (inputText.includes('黑店') || inputText.includes('記得')) {
+      if (inputText.includes('遠單') || inputText.includes('加價') || inputText.includes('黑店')) {
         db.runSync('INSERT INTO Experience (rule, date) VALUES (?, ?)', [inputText, new Date().toISOString()]);
       }
 
     } catch (err) {
-      setMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'ai', text: '⚠️ DeepSeek 連線失敗，啟動本機降級回應。' }]);
+      setMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'ai', text: '⚠️ DeepSeek API 連線失敗，請檢查網路或 Token。' }]);
     }
   };
 
   return (
     <View style={styles.container}>
-      {/* 頂部控制面板 */}
       <View style={styles.dashboard}>
-        <Text style={styles.gpsText}>📍 {locationText} | 🧠 SQLite就緒</Text>
+        <Text style={styles.gpsText}>📍 {locationText} | 🔑 API 鎖匙已掛載</Text>
         
         <View style={styles.switchContainer}>
           <View style={styles.switchRow}>
-            <Text style={styles.switchLabel}>浮遊視窗 (HUD)</Text>
+            <Text style={styles.switchLabel}>浮遊 HUD</Text>
             <Switch value={isFloatingMode} onValueChange={setIsFloatingMode} trackColor={{ true: '#00FF66' }} />
           </View>
           <View style={styles.switchRow}>
-            <Text style={styles.switchLabel}>自動刷新 (代替手刷)</Text>
+            <Text style={styles.switchLabel}>自動手刷刷新</Text>
             <Switch value={isAutoRefresh} onValueChange={setIsAutoRefresh} trackColor={{ true: '#00FF66' }} />
           </View>
           <View style={styles.switchRow}>
-            <Text style={styles.switchLabel}>AI 自動搶單 (擬真點擊)</Text>
+            <Text style={styles.switchLabel}>AI 搶單 (先搶先得)</Text>
             <Switch value={isAutoClick} onValueChange={setIsAutoClick} trackColor={{ true: '#FF3366' }} />
+          </View>
+          <View style={styles.switchRow}>
+            <Text style={styles.switchLabel}>自動濾掉低價遠單</Text>
+            <Switch value={rejectLongDistance} onValueChange={setRejectLongDistance} trackColor={{ true: '#00FF66' }} />
           </View>
         </View>
       </View>
 
-      {/* 聊天與日誌區 (休閒傾計 / 開工日誌) */}
       <ScrollView style={styles.chatBox}>
         {messages.map((m) => (
           <View key={m.id} style={[styles.msgBubble, m.sender === 'user' ? styles.userBubble : styles.aiBubble]}>
@@ -119,17 +118,16 @@ export default function App() {
         ))}
       </ScrollView>
 
-      {/* 底部對話框 */}
       <View style={styles.inputRow}>
         <TextInput
           style={styles.input}
-          placeholder="輸入開工指令、新規則或日常傾計..."
+          placeholder="輸入指令，例如：『記得黃埔永年士多出餐慢』..."
           placeholderTextColor="#888"
           value={inputText}
           onChangeText={setInputText}
         />
         <TouchableOpacity style={styles.sendBtn} onPress={handleSend}>
-          <Text style={styles.sendBtnText}>發送 / 記憶</Text>
+          <Text style={styles.sendBtnText}>記憶/對話</Text>
         </TouchableOpacity>
       </View>
     </View>
