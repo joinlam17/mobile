@@ -30,12 +30,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Build Android APK with Expo
+      - name: Generate Native Android Project
+        run: npx expo prebuild --platform android --clean
+
+      - name: Build Android APK
         run: |
-          npx expo prebuild --platform android
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease
+          ./gradlew assembleRelease --no-daemon
 
       - name: Upload APK Artifact
         uses: actions/upload-artifact@v4
