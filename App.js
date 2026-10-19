@@ -1,18 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { 
   StyleSheet, Text, View, TextInput, TouchableOpacity, 
-  ScrollView, Switch, KeyboardAvoidingView, Platform, SafeAreaView 
+  ScrollView, Switch, KeyboardAvoidingView, Platform, SafeAreaView, StatusBar 
 } from 'react-native';
 import * as Location from 'expo-location';
 import * as SQLite from 'expo-sqlite';
 import axios from 'axios';
 
-const DEEPSEEK_API_KEY = 'Sk-560d90c0c5054500be5d21ade4d3af2d';
+// 鎖入全新 DeepSeek API Key
+const DEEPSEEK_API_KEY = 'sk-5bf4ab1fed514d0382f7755b0145476d';
 const db = SQLite.openDatabaseSync('brain_memory.db');
 
 export default function App() {
   const [messages, setMessages] = useState([
-    { id: 1, sender: 'ai', text: '😈 DeepSeek API 鎖匙已成功解鎖！地址算盤、先搶先得與 SQLite 記憶庫全面升級。' }
+    { id: 1, sender: 'ai', text: '😈 新 API Key 已掛載！全螢幕鍵盤適配完成，輸入框不會再被擋住。' }
   ]);
   const [inputText, setInputText] = useState('');
   const [locationText, setLocationText] = useState('定位中...');
@@ -23,9 +24,13 @@ export default function App() {
   const [rejectLongDistance, setRejectLongDistance] = useState(true);
 
   useEffect(() => {
-    db.execSync(`
-      CREATE TABLE IF NOT EXISTS Experience (id INTEGER PRIMARY KEY AUTOINCREMENT, rule TEXT, date TEXT);
-    `);
+    try {
+      db.execSync(`
+        CREATE TABLE IF NOT EXISTS Experience (id INTEGER PRIMARY KEY AUTOINCREMENT, rule TEXT, date TEXT);
+      `);
+    } catch (e) {
+      console.log('DB Init Error:', e);
+    }
 
     (async () => {
       let { status } = await Location.requestForegroundPermissionsAsync();
@@ -42,11 +47,17 @@ export default function App() {
     if (!inputText.trim()) return;
     const userMsg = { id: Date.now(), sender: 'user', text: inputText };
     setMessages((prev) => [...prev, userMsg]);
+    const currentInput = inputText;
     setInputText('');
 
     try {
-      const memory = db.getAllSync('SELECT * FROM Experience ORDER BY id DESC LIMIT 3');
-      const memoryContext = memory.map(m => m.rule).join('; ');
+      let memoryContext = '';
+      try {
+        const memory = db.getAllSync('SELECT * FROM Experience ORDER BY id DESC LIMIT 3');
+        memoryContext = memory.map(m => m.rule).join('; ');
+      } catch (e) {
+        console.log('DB Read Error:', e);
+      }
 
       const response = await axios.post('https://api.deepseek.com/chat/completions', {
         model: 'deepseek-chat',
@@ -58,36 +69,43 @@ export default function App() {
             1. 認准黃色按鈕文字：['搶柯打', '收到', '接2張訂單', '先搶先得']。
             2. 地址與金額算盤：如果送達地址為遠區/跨區/上山，且金額 < $50，輸出 [IGNORE]！` 
           },
-          { role: 'user', content: inputText }
+          { role: 'user', content: currentInput }
         ]
       }, {
         headers: { 
           'Authorization': `Bearer ${DEEPSEEK_API_KEY}`,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 10000
       });
 
       const aiReply = response.data.choices[0].message.content;
       setMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'ai', text: aiReply }]);
       
-      if (inputText.includes('遠單') || inputText.includes('加價') || inputText.includes('黑店')) {
-        db.runSync('INSERT INTO Experience (rule, date) VALUES (?, ?)', [inputText, new Date().toISOString()]);
+      if (currentInput.includes('遠單') || currentInput.includes('加價') || currentInput.includes('黑店')) {
+        try {
+          db.runSync('INSERT INTO Experience (rule, date) VALUES (?, ?)', [currentInput, new Date().toISOString()]);
+        } catch (e) {
+          console.log('DB Write Error:', e);
+        }
       }
 
     } catch (err) {
-      setMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'ai', text: '⚠️ DeepSeek API 連線失敗。' }]);
+      const errMsg = err.response?.data?.error?.message || err.message || '連線失敗';
+      setMessages((prev) => [...prev, { id: Date.now() + 1, sender: 'ai', text: `⚠️ DeepSeek API 報錯: ${errMsg}` }]);
     }
   };
 
   return (
     <SafeAreaView style={styles.safeArea}>
+      <StatusBar barStyle="light-content" backgroundColor="#0A0A0A" />
       <KeyboardAvoidingView 
-        style={styles.container} 
+        style={styles.keyboardContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'android' ? 25 : 0}
       >
+        {/* 頂部控制面板 */}
         <View style={styles.dashboard}>
-          <Text style={styles.gpsText}>📍 {locationText} | 🔑 API 鎖匙已掛載</Text>
+          <Text style={styles.gpsText}>📍 {locationText} | 🔑 新 Key 已掛載</Text>
           
           <View style={styles.switchContainer}>
             <View style={styles.switchRow}>
@@ -109,7 +127,12 @@ export default function App() {
           </View>
         </View>
 
-        <ScrollView style={styles.chatBox}>
+        {/* 聊天與日誌對話區 */}
+        <ScrollView 
+          style={styles.chatBox}
+          contentContainerStyle={{ paddingBottom: 20 }}
+          keyboardShouldPersistTaps="handled"
+        >
           {messages.map((m) => (
             <View key={m.id} style={[styles.msgBubble, m.sender === 'user' ? styles.userBubble : styles.aiBubble]}>
               <Text style={styles.msgText}>{m.text}</Text>
@@ -117,6 +140,7 @@ export default function App() {
           ))}
         </ScrollView>
 
+        {/* 底部輸入框 */}
         <View style={styles.inputRow}>
           <TextInput
             style={styles.input}
@@ -136,7 +160,7 @@ export default function App() {
 
 const styles = StyleSheet.create({
   safeArea: { flex: 1, backgroundColor: '#0A0A0A' },
-  container: { flex: 1, backgroundColor: '#0A0A0A', paddingTop: Platform.OS === 'android' ? 30 : 0 },
+  keyboardContainer: { flex: 1 },
   dashboard: { padding: 15, backgroundColor: '#1A1A1A', borderBottomWidth: 1, borderColor: '#333' },
   gpsText: { color: '#00FF66', fontSize: 13, fontWeight: 'bold', marginBottom: 10 },
   switchContainer: { flexDirection: 'row', justifyContent: 'space-between', flexWrap: 'wrap' },
@@ -147,8 +171,8 @@ const styles = StyleSheet.create({
   userBubble: { alignSelf: 'flex-end', backgroundColor: '#005bb5' },
   aiBubble: { alignSelf: 'flex-start', backgroundColor: '#2C2C2E', borderWidth: 1, borderColor: '#444' },
   msgText: { color: '#E0E0E0', fontSize: 14, lineHeight: 20 },
-  inputRow: { flexDirection: 'row', padding: 12, backgroundColor: '#1A1A1A', paddingBottom: Platform.OS === 'android' ? 25 : 12 },
+  inputRow: { flexDirection: 'row', padding: 10, backgroundColor: '#1A1A1A', alignItems: 'center' },
   input: { flex: 1, backgroundColor: '#2C2C2E', color: '#FFF', paddingHorizontal: 15, borderRadius: 20, height: 45 },
-  sendBtn: { backgroundColor: '#00FF66', paddingHorizontal: 20, justifyContent: 'center', marginLeft: 10, borderRadius: 20 },
+  sendBtn: { backgroundColor: '#00FF66', paddingHorizontal: 20, height: 45, justifyContent: 'center', marginLeft: 10, borderRadius: 20 },
   sendBtnText: { color: '#000', fontWeight: 'bold' }
 });
