@@ -28,7 +28,7 @@ jobs:
         run: npm ci
 
       - name: Generate Native Android
-        run: npx expo prebuild --platform android
+        run: echo 'Keep local android folder'
 
       - name: Build APK with Gradle
         run: |
